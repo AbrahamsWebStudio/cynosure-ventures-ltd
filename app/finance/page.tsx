@@ -1,23 +1,41 @@
-// ✅ /app/finance/page.tsx for Quantum Leap Tech
+// ✅ /app/finance/page.tsx for CYNOSURE-VENTURES-LTD
 
 'use client';
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
+type Transaction = {
+  id: string | number;
+  created_at: string;
+  user_email?: string;
+  type?: string;
+  amount?: number;
+  status?: string;
+};
+
 export default function FinancePage() {
-  const [transactions, setTransactions] = useState([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchTransactions = async () => {
-      const { data, error } = await supabase.from('transactions').select('*').order('created_at', { ascending: false });
-      if (!error) setTransactions(data);
+      const { data, error } = await supabase
+        .from('transactions')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error) {
+        setError(error.message);
+      } else {
+        setTransactions(data ?? []);
+      }
       setLoading(false);
     };
     fetchTransactions();
   }, []);
 
   if (loading) return <div className="p-4">Loading finance dashboard...</div>;
+  if (error) return <div className="p-4 text-red-600">Error: {error}</div>;
 
   return (
     <main className="p-4 max-w-3xl mx-auto">
@@ -35,11 +53,11 @@ export default function FinancePage() {
         <tbody>
           {transactions.map((tx) => (
             <tr key={tx.id} className="border-t hover:bg-gray-50">
-              <td className="p-2 text-sm">{new Date(tx.created_at).toLocaleDateString()}</td>
-              <td className="p-2 text-sm">{tx.user_email || 'N/A'}</td>
-              <td className="p-2 text-sm">{tx.type}</td>
-              <td className="p-2 text-sm">{tx.amount}</td>
-              <td className="p-2 text-sm">{tx.status}</td>
+              <td className="p-2 text-sm">{tx.created_at ? new Date(tx.created_at).toLocaleDateString() : 'N/A'}</td>
+              <td className="p-2 text-sm">{tx.user_email ?? 'N/A'}</td>
+              <td className="p-2 text-sm">{tx.type ?? 'N/A'}</td>
+              <td className="p-2 text-sm">{tx.amount ?? 'N/A'}</td>
+              <td className="p-2 text-sm">{tx.status ?? 'N/A'}</td>
             </tr>
           ))}
         </tbody>

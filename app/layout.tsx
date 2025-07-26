@@ -1,32 +1,17 @@
-import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
-import "./globals.css";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
-
-export const metadata: Metadata = {
-  title: "Quantum Leap Tech - Seamless Commerce & Transport",
-  description: "Quantum Leap Tech connects Africa with seamless e-commerce, logistics, and passenger services with integrated MPESA eWallet.",
+import './globals.css';
+export const metadata = {
+  title: "CYNOSURE VENTURES LTD",
+  description: "Financial Management System",
 };
 
 export default function RootLayout({
   children,
-}: Readonly<{
+}: {
   children: React.ReactNode;
-}>) {
+}) {
   return (
     <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased bg-gray-50 text-gray-900 dark:bg-gray-900 dark:text-gray-100`}>
-        {children}
-      </body>
+      <body>{children}</body>
     </html>
   );
 }

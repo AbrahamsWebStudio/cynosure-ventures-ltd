@@ -1,38 +1,28 @@
-import { create } from 'zustand'
+// store/cartStore.ts
+import { create } from "zustand";
 
 interface CartItem {
   id: string;
   title: string;
   price: number;
-  quantity: number;
-  image_url: string;
+  image_url?: string;
 }
 
-interface CartStore {
+interface CartState {
   cart: CartItem[];
   addToCart: (item: CartItem) => void;
-  removeFromCart: (id: string) => void;
+  removeFromCart: (index: number) => void;
   clearCart: () => void;
 }
 
-export const useCartStore = create<CartStore>((set) => ({
+export const useCartStore = create<CartState>((set) => ({
   cart: [],
-  addToCart: (item) =>
+  addToCart: (item) => set((state) => ({ cart: [...state.cart, item] })),
+  removeFromCart: (index) =>
     set((state) => {
-      const existing = state.cart.find((i) => i.id === item.id);
-      if (existing) {
-        return {
-          cart: state.cart.map((i) =>
-            i.id === item.id ? { ...i, quantity: i.quantity + item.quantity } : i
-          ),
-        };
-      } else {
-        return { cart: [...state.cart, item] };
-      }
+      const newCart = [...state.cart];
+      newCart.splice(index, 1);
+      return { cart: newCart };
     }),
-  removeFromCart: (id) =>
-    set((state) => ({
-      cart: state.cart.filter((item) => item.id !== id),
-    })),
   clearCart: () => set({ cart: [] }),
 }));
