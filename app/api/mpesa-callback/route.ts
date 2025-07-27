@@ -13,8 +13,8 @@ export async function POST(req: Request) {
 
     const resultCode = body.Body.stkCallback.ResultCode;
     const metadata = body.Body.stkCallback.CallbackMetadata?.Item || [];
-    const amount = metadata.find((item: any) => item.Name === "Amount")?.Value;
-    const phoneNumber = metadata.find((item: any) => item.Name === "PhoneNumber")?.Value;
+    const amount = metadata.find((item: { Name: string; Value: string }) => item.Name === "Amount")?.Value;
+    const phoneNumber = metadata.find((item: { Name: string; Value: string }) => item.Name === "PhoneNumber")?.Value;
     const checkoutRequestID = body.Body.stkCallback.CheckoutRequestID;
 
     if (resultCode === 0) {
@@ -123,8 +123,9 @@ export async function POST(req: Request) {
       console.log("Payment failed or cancelled, ResultCode:", resultCode);
       return NextResponse.json({ message: "Payment was not successful" });
     }
-  } catch (error: any) {
-    console.error("Callback error:", error.message || error);
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error("Callback error:", errorMessage);
     return NextResponse.json({ message: "Server error processing callback" }, { status: 500 });
   }
 }

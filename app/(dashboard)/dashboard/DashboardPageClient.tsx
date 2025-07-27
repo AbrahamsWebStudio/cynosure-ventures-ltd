@@ -27,8 +27,8 @@ interface Profile {
 }
 
 interface DashboardPageClientProps {
-  user: any; // You can use a more specific type if you want
-  session: any;
+  user: { id: string; email?: string; last_sign_in_at?: string };
+  session: { user: { id: string; email?: string; last_sign_in_at?: string } } | null;
 }
 
 export default function DashboardPageClient({ user, session }: DashboardPageClientProps) {

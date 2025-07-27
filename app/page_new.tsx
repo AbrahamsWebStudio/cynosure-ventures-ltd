@@ -47,7 +47,7 @@ export default function HomePage() {
               Everything You Need in One Platform
             </h2>
             <p className="text-lg text-gray-600 max-w-2xl mx-auto">
-              From shopping to shipping, transport to payments - we've got you covered with integrated services.
+              From shopping to shipping, transport to payments - we&apos;ve got you covered with integrated services.
             </p>
           </div>
           

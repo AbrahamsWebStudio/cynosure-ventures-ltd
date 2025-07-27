@@ -87,8 +87,8 @@ export default function VendorsListPage() {
         </div>
         {/* Export Buttons */}
         <div className="flex gap-2">
-          <Button onClick={() => exportToCSV(vendors, 'vendors_export')}>Export CSV</Button>
-          <Button onClick={() => exportToExcel(vendors, 'vendors_export')}>Export Excel</Button>
+          <Button onClick={() => exportToCSV(vendors as any[], 'vendors_export')}>Export CSV</Button>
+          <Button onClick={() => exportToExcel(vendors as any[], 'vendors_export')}>Export Excel</Button>
         </div>
         {/* Vendors Table */}
         <div className="overflow-x-auto">

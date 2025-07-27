@@ -1,6 +1,11 @@
+// @ts-expect-error - json2csv types not available
 import { parse } from 'json2csv';
 
-export default function exportToCSV(data: any[], filename: string) {
+interface ExportData {
+  [key: string]: string | number | boolean | null | undefined;
+}
+
+export default function exportToCSV(data: ExportData[], filename: string) {
   const csv = parse(data);
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);

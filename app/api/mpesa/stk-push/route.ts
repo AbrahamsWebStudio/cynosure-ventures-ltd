@@ -52,10 +52,11 @@ export async function POST(req: NextRequest) {
     );
 
     return NextResponse.json(stkResponse);
-  } catch (error: any) {
-    console.error("MPESA STK Push Error:", error.response?.data || error.message);
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error("MPESA STK Push Error:", errorMessage);
     return NextResponse.json(
-      { error: error.response?.data || error.message },
+      { error: errorMessage },
       { status: 500 }
     );
   }

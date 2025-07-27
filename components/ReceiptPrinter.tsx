@@ -154,7 +154,7 @@ export default function ReceiptPrinter({ receiptData, onPrint, onClose, isOpen }
     URL.revokeObjectURL(url);
   };
 
-  const handleSettingsChange = (setting: string, value: any) => {
+  const handleSettingsChange = (setting: string, value: string | number | boolean) => {
     setPrinterSettings(prev => ({
       ...prev,
       [setting]: value
