@@ -1,23 +1,40 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState, useEffect } from 'react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
-
-import Link from 'next/link';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+
+import exportToCSV from '@/lib/utils/exportToCSV';
+import exportToExcel from '@/lib/utils/exportToExcel';
+
+interface Role {
+  id: string;
+  name: string;
+  description: string | null;
+  created_at: string;
+}
 
 export default function RolesListPage() {
   const supabase = createClientComponentClient();
-  const [roles, setRoles] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [roles, setRoles] = useState<Role[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [filter, setFilter] = useState('');
+
+  const fetchRoles = async () => {
+    setLoading(true);
+    const { data } = await supabase
+      .from('roles')
+      .select('*')
+      .ilike('name', `%${filter}%`)
+      .order('created_at', { ascending: false });
+    setRoles(data || []);
+    setLoading(false);
+  };
 
   useEffect(() => {
-    const fetchRoles = async () => {
-      const { data } = await supabase.from('roles').select('*').order('name');
-      setRoles(data || []);
-      setLoading(false);
-    };
     fetchRoles();
+    // eslint-disable-next-line
   }, []);
 
   const deleteRole = async (roleId: string) => {
@@ -36,18 +53,6 @@ export default function RolesListPage() {
       if (!existingRole) {
         alert('Role not found. It may have already been deleted.');
         await fetchRoles();
-        return;
-      }
-
-      // Check if role has associated employees
-      const { data: employees } = await supabase
-        .from('employees')
-        .select('id')
-        .eq('role_id', roleId)
-        .limit(1);
-
-      if (employees && employees.length > 0) {
-        alert('Cannot delete role. It has associated employees. Please reassign or remove the employees first.');
         return;
       }
 
@@ -70,37 +75,38 @@ export default function RolesListPage() {
     }
   };
 
-  const fetchRoles = async () => {
-    const { data } = await supabase.from('roles').select('*').order('name');
-    setRoles(data || []);
-  };
-
   return (
     <>
-      <main className="max-w-2xl mx-auto p-4 space-y-6">
-        <div className="flex justify-end mb-4">
-          <Link href="/finance/roles/add">
-            <Button type="button">Add Role</Button>
-          </Link>
+      <main className="max-w-4xl mx-auto p-4 space-y-6">
+        <h1 className="text-2xl sm:text-3xl font-bold text-center dark:text-white">Roles List</h1>
+        {/* Filter */}
+        <div className="flex gap-2">
+          <Input placeholder="Filter by name..." value={filter} onChange={(e) => setFilter(e.target.value)} />
+          <Button onClick={fetchRoles} disabled={loading}>{loading ? 'Loading...' : 'Apply Filter'}</Button>
         </div>
-        <h1 className="text-2xl font-bold text-center">Roles List</h1>
-        {loading ? (
-          <p>Loading...</p>
-        ) : (
+        {/* Export Buttons */}
+        <div className="flex gap-2">
+          <Button onClick={() => exportToCSV(roles as unknown as { [key: string]: string | number | boolean | null | undefined }[], 'roles_export')}>Export CSV</Button>
+          <Button onClick={() => exportToExcel(roles as unknown as { [key: string]: string | number | boolean | null | undefined }[], 'roles_export')}>Export Excel</Button>
+        </div>
+        {/* Roles Table */}
+        <div className="overflow-x-auto">
           <table className="min-w-full bg-white dark:bg-gray-900 rounded-lg shadow mt-4">
             <thead>
-              <tr>
-                <th className="p-2">Role Name</th>
+              <tr className="text-left border-b dark:border-gray-700">
+                <th className="p-2">Name</th>
                 <th className="p-2">Description</th>
+                <th className="p-2">Created At</th>
                 <th className="p-2">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {roles.map(role => (
-                <tr key={role.id} className="border-b dark:border-gray-700">
-                  <td className="p-2">{role.name}</td>
-                  <td className="p-2">{role.description || 'N/A'}</td>
-                  <td className="p-2">
+              {roles.map((role) => (
+                <tr key={role.id} className="border-b dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800">
+                  <td className="p-2 text-sm">{role.name}</td>
+                  <td className="p-2 text-sm">{role.description || 'N/A'}</td>
+                  <td className="p-2 text-sm">{new Date(role.created_at).toLocaleString()}</td>
+                  <td className="p-2 text-sm">
                     <button
                       onClick={() => deleteRole(role.id)}
                       className="bg-red-600 text-white px-3 py-1 rounded text-xs hover:bg-red-700"
@@ -112,7 +118,7 @@ export default function RolesListPage() {
               ))}
             </tbody>
           </table>
-        )}
+        </div>
       </main>
     </>
   );

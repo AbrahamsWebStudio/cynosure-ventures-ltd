@@ -17,6 +17,7 @@ interface Product {
   stock: number | null;
   barcode: string | null;
   created_at: string;
+  [key: string]: string | number | boolean | null | undefined;
 }
 
 export default function ProductsListPage() {

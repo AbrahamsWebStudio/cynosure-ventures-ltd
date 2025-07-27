@@ -29,6 +29,10 @@ export default function CheckoutPage() {
   const [showPinSetup, setShowPinSetup] = useState(false);
   const total = cart.reduce((sum, item) => sum + item.price, 0);
   const router = useRouter();
+  const [checkingAuth, setCheckingAuth] = useState(true);
+  const [confirmationCode, setConfirmationCode] = useState("");
+  const [showConfirmationInput, setShowConfirmationInput] = useState(false);
+  const TILL_NUMBER = "8295165"; // Updated till number
 
   // Fetch user's wallet
   useEffect(() => {
@@ -46,6 +50,22 @@ export default function CheckoutPage() {
     };
     fetchWallet();
   }, []);
+
+  useEffect(() => {
+    const checkAuth = async () => {
+      const { data: { user } } = await supabaseBrowser.auth.getUser();
+      if (!user) {
+        router.replace("/login?redirect=/checkout");
+      } else {
+        setCheckingAuth(false);
+      }
+    };
+    checkAuth();
+  }, [router]);
+
+  if (checkingAuth) {
+    return <div className="min-h-screen flex items-center justify-center">Checking authentication...</div>;
+  }
 
   const handleMpesaPayment = async () => {
     if (!mpesaPhone) {
@@ -237,6 +257,50 @@ export default function CheckoutPage() {
     }
   };
 
+  const handleConfirmPayment = () => {
+    setShowConfirmationInput(true);
+  };
+
+  const handleMpesaManualPayment = async () => {
+    if (!confirmationCode) {
+      setMessage("Please enter the Mpesa confirmation code.");
+      return;
+    }
+    setLoading(true);
+    try {
+      const { data: { user } } = await supabaseBrowser.auth.getUser();
+      if (!user) throw new Error("User not authenticated");
+      // Create an order for each cart item
+      for (const item of cart) {
+        const { error } = await supabaseBrowser.from("orders").insert({
+          user_id: user.id,
+          product_id: item.id,
+          quantity: 1,
+          total_amount: item.price,
+          status: "pending",
+          payment_method: "mpesa",
+          confirmation_code: confirmationCode,
+        });
+        if (error) {
+          setMessage("❌ Failed to create order. Please try again.");
+          setLoading(false);
+          return;
+        }
+      }
+      setMessage("✅ Order placed successfully! Your order is pending approval. You will be notified once payment is verified.");
+      clearCart();
+      setConfirmationCode("");
+      setShowConfirmationInput(false);
+      setTimeout(() => {
+        router.push("/dashboard");
+      }, 2000);
+    } catch (error) {
+      setMessage("❌ Failed to place order. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   if (cart.length === 0) {
     return (
       <>
@@ -344,20 +408,49 @@ export default function CheckoutPage() {
         {/* MPESA Payment Form */}
         {paymentMethod === "mpesa" && (
           <div className="space-y-4 mb-6">
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+              <h3 className="font-semibold text-green-800 mb-3">Lipa na Mpesa Payment</h3>
+              <p className="text-sm text-green-700 mb-3">
+                Pay to our Till Number: <span className="font-bold text-lg">{TILL_NUMBER}</span>
+              </p>
+              <div className="bg-white rounded p-3 mb-4">
+                <p className="text-sm font-medium text-gray-800 mb-2">Payment Steps:</p>
+                <ol className="text-xs text-gray-700 list-decimal ml-5 space-y-1">
+                  <li>Go to your Mpesa menu and select <strong>Lipa na Mpesa</strong></li>
+                  <li>Select <strong>Buy Goods and Services</strong></li>
+                  <li>Enter Till Number: <strong>{TILL_NUMBER}</strong></li>
+                  <li>Enter Amount: <strong>KES {total}</strong></li>
+                  <li>Enter your Mpesa PIN and complete payment</li>
+                  <li>Copy the confirmation code from the SMS you receive</li>
+                </ol>
+              </div>
+              
+              {!showConfirmationInput ? (
+                <button
+                  onClick={handleConfirmPayment}
+                  className="w-full bg-green-600 text-white py-4 rounded-lg font-semibold text-xl hover:bg-white hover:text-green-600 hover:border hover:border-green-600 transition shadow hover:shadow-lg"
+                >
+                  Confirm Payment
+                </button>
+              ) : (
+                <div className="space-y-3">
             <input
               type="text"
-              placeholder="Enter MPESA phone number"
-              value={mpesaPhone}
-              onChange={(e) => setMpesaPhone(e.target.value)}
+                    placeholder="QFRT234..."
+                    value={confirmationCode}
+                    onChange={(e) => setConfirmationCode(e.target.value)}
               className="border border-gray-700 bg-gray-900 rounded p-3 w-full text-lg placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-green-600 transition"
             />
             <button
-              onClick={handleMpesaPayment}
+                    onClick={handleMpesaManualPayment}
               disabled={loading}
               className="w-full bg-green-600 text-white py-4 rounded-lg font-semibold text-xl hover:bg-white hover:text-green-600 hover:border hover:border-green-600 transition shadow hover:shadow-lg disabled:opacity-50"
             >
-              {loading ? "Processing..." : "Pay with MPESA"}
+                    {loading ? "Processing..." : "Submit Confirmation Code"}
             </button>
+                </div>
+              )}
+            </div>
           </div>
         )}
 

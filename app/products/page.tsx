@@ -16,6 +16,7 @@ interface Product {
   title: string;
   price: number;
   image_url: string;
+  category?: string;
 }
 
 export default function ProductsPage() {
@@ -26,13 +27,17 @@ export default function ProductsPage() {
     const fetchProducts = async () => {
       const { data, error } = await supabase
         .from("products")
-        .select("id, title, price, image_url")
+        .select("id, title, price, image_url, category")
         .order("created_at", { ascending: false });
 
       if (error) {
         console.error("Error fetching products:", error);
       } else {
-        setProducts(data || []);
+        // Filter out the Wallet Top-Up product on the client side
+        const filteredProducts = (data || []).filter(product => 
+          product.title !== "Wallet Top-Up" && product.category !== "wallet"
+        );
+        setProducts(filteredProducts);
       }
       setLoading(false);
     };

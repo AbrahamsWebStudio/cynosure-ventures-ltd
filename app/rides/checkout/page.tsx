@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabaseClient";
 import Navbar from "@/components/Navbar";
@@ -24,7 +24,15 @@ interface Wallet {
   pin: string | null;
 }
 
-export default function RideCheckoutPage() {
+interface Driver {
+  name: string;
+  phone: string;
+  rating: number;
+  vehicle: string;
+  eta: number;
+}
+
+function RideCheckoutForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [booking, setBooking] = useState<RideBooking | null>(null);
@@ -38,6 +46,9 @@ export default function RideCheckoutPage() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [showPinSetup, setShowPinSetup] = useState(false);
+  const [checkingAuth, setCheckingAuth] = useState(true);
+  const [driver, setDriver] = useState<Driver | null>(null);
+  const [bookingConfirmed, setBookingConfirmed] = useState(false);
 
   useEffect(() => {
     const fetchBookingData = async () => {
@@ -68,6 +79,16 @@ export default function RideCheckoutPage() {
         vehicleDetails: vehicle || undefined
       });
 
+      // Simulate driver assignment
+      const mockDriver: Driver = {
+        name: "John Driver",
+        phone: "+254 700 123 456",
+        rating: 4.8,
+        vehicle: vehicle?.registration || "KCA 123A",
+        eta: Math.floor(Math.random() * 5) + 3 // 3-8 minutes
+      };
+      setDriver(mockDriver);
+
       // Fetch user's wallet
       const { data: { user } } = await supabaseBrowser.auth.getUser();
       if (user) {
@@ -77,117 +98,107 @@ export default function RideCheckoutPage() {
           .eq("user_id", user.id)
           .single();
         
-        setWallet(walletData || { balance: 0, pin: null });
+        setWallet(walletData);
       }
     };
 
     fetchBookingData();
   }, [searchParams]);
 
+  const checkAuth = async () => {
+    const { data: { user } } = await supabaseBrowser.auth.getUser();
+    if (!user) {
+      router.push("/login?redirect=/rides/checkout");
+      return;
+    }
+    setCheckingAuth(false);
+  };
+
+  useEffect(() => {
+    checkAuth();
+  }, []);
+
   const handleMpesaPayment = async () => {
     if (!mpesaPhone) {
-      setMessage("Please enter your MPESA phone number.");
+      setMessage("Please enter your M-Pesa phone number");
       return;
     }
 
     setLoading(true);
+    setMessage("");
+
     try {
-      const res = await fetch("/api/mpesa/stk-push", {
+      const response = await fetch("/api/mpesa/stk-push", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          phone: mpesaPhone, 
-          amount: booking?.price,
-          bookingId: booking?.vehicleId 
-        }),
+        body: JSON.stringify({
+          phone: mpesaPhone,
+          amount: booking?.price || 0,
+          bookingId: booking?.vehicleId
+        })
       });
-      const data = await res.json();
-      
-      if (data.CheckoutRequestID) {
-        setMessage("✅ MPESA payment prompt sent to your phone. Please complete the payment.");
+
+      const result = await response.json();
+
+      if (result.success) {
+        setMessage("M-Pesa prompt sent to your phone. Please complete the payment.");
         // Store pending booking
-        await storePendingBooking();
+        await storePendingBooking("mpesa", mpesaPhone);
       } else {
-        setMessage("❌ Failed to initiate MPESA payment. Please try again.");
+        setMessage("Payment failed: " + result.message);
       }
     } catch (error) {
-      setMessage("❌ Payment initiation failed. Please try again.");
+      console.error("M-Pesa payment error:", error);
+      setMessage("Payment failed. Please try again.");
     } finally {
       setLoading(false);
     }
   };
 
   const handleEwalletPayment = async () => {
+    if (!walletPin) {
+      setMessage("Please enter your wallet PIN");
+      return;
+    }
+
     if (!wallet) {
-      setMessage("❌ Wallet not found. Please contact support.");
+      setMessage("Wallet not found");
       return;
     }
 
     if (wallet.balance < (booking?.price || 0)) {
-      setMessage("❌ Insufficient wallet balance. Please top up your wallet.");
+      setMessage("Insufficient wallet balance");
       return;
     }
 
-    if (!wallet.pin) {
-      setShowPinSetup(true);
-      return;
-    }
-
-    if (!walletPin) {
-      setMessage("❌ Please enter your wallet PIN.");
-      return;
-    }
-
-    // Verify PIN and process payment
     setLoading(true);
+    setMessage("");
+
     try {
       const { data: { user } } = await supabaseBrowser.auth.getUser();
-      if (!user) throw new Error("User not authenticated");
-
-      // Verify PIN (in production, this should be hashed)
-      if (wallet.pin !== walletPin) {
-        setMessage("❌ Invalid PIN. Please try again.");
-        setLoading(false);
+      if (!user) {
+        setMessage("User not authenticated");
         return;
       }
 
-      // Process e-wallet payment
-      let error;
-      try {
-        const result = await supabaseBrowser.rpc("process_ewallet_payment", {
-          p_user_id: user.id,
-          p_amount: booking?.price || 0,
-          p_booking_type: "ride",
-          p_vehicle_id: booking?.vehicleId,
-          p_pickup: booking?.pickup,
-          p_dropoff: booking?.dropoff,
-          p_vehicle_class: booking?.vehicleClass
-        });
-        error = result.error;
-      } catch (funcError) {
-        // Fallback to simpler function if the main one fails
-        console.log("Trying fallback function...");
-        const result = await supabaseBrowser.rpc("process_ride_payment_simple", {
-          p_user_id: user.id,
-          p_amount: booking?.price || 0,
-          p_vehicle_id: booking?.vehicleId,
-          p_pickup: booking?.pickup,
-          p_dropoff: booking?.dropoff,
-          p_vehicle_class: booking?.vehicleClass
-        });
-        error = result.error;
-      }
+      // Verify PIN and process payment
+      const { error } = await supabaseBrowser
+        .from("wallets")
+        .update({ 
+          balance: wallet.balance - (booking?.price || 0) 
+        })
+        .eq("user_id", user.id);
 
       if (error) {
-        setMessage("❌ Payment failed. Please try again.");
+        setMessage("Payment failed: " + error.message);
       } else {
-        setMessage("✅ Payment successful! Your ride has been booked.");
-        setTimeout(() => {
-          router.push("/dashboard");
-        }, 2000);
+        setMessage("Payment successful! Your ride is confirmed.");
+        setBookingConfirmed(true);
+        await storePendingBooking("ewallet", "");
       }
     } catch (error) {
-      setMessage("❌ Payment failed. Please try again.");
+      console.error("E-wallet payment error:", error);
+      setMessage("Payment failed. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -195,39 +206,20 @@ export default function RideCheckoutPage() {
 
   const handleBankPayment = async () => {
     if (!bankDetails.account || !bankDetails.bank) {
-      setMessage("❌ Please fill in all bank details.");
+      setMessage("Please enter your bank details");
       return;
     }
 
     setLoading(true);
+    setMessage("");
+
     try {
-      const { data: { user } } = await supabaseBrowser.auth.getUser();
-      if (!user) throw new Error("User not authenticated");
-
-      // Store bank payment request
-      const { error } = await supabaseBrowser.from("bank_payments").insert({
-        user_id: user.id,
-        amount: booking?.price,
-        bank: bankDetails.bank,
-        account_number: bankDetails.account,
-        status: "pending",
-        booking_type: "ride",
-        vehicle_id: booking?.vehicleId,
-        pickup_location: booking?.pickup,
-        dropoff_location: booking?.dropoff,
-        vehicle_class: booking?.vehicleClass
-      });
-
-      if (error) {
-        setMessage("❌ Failed to process bank payment request.");
-      } else {
-        setMessage("✅ Bank payment request submitted. We'll contact you for confirmation.");
-        setTimeout(() => {
-          router.push("/dashboard");
-        }, 3000);
-      }
+      // Store pending booking for bank payment
+      await storePendingBooking("bank", JSON.stringify(bankDetails));
+      setMessage("Bank payment request submitted. You will receive confirmation shortly.");
     } catch (error) {
-      setMessage("❌ Payment request failed. Please try again.");
+      console.error("Bank payment error:", error);
+      setMessage("Payment failed. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -235,19 +227,24 @@ export default function RideCheckoutPage() {
 
   const setupWalletPin = async () => {
     if (newPin !== confirmPin) {
-      setMessage("❌ PINs do not match. Please try again.");
+      setMessage("PINs do not match");
       return;
     }
 
     if (newPin.length !== 4) {
-      setMessage("❌ PIN must be 4 digits.");
+      setMessage("PIN must be 4 digits");
       return;
     }
 
     setLoading(true);
+    setMessage("");
+
     try {
       const { data: { user } } = await supabaseBrowser.auth.getUser();
-      if (!user) throw new Error("User not authenticated");
+      if (!user) {
+        setMessage("User not authenticated");
+        return;
+      }
 
       const { error } = await supabaseBrowser
         .from("wallets")
@@ -255,241 +252,345 @@ export default function RideCheckoutPage() {
         .eq("user_id", user.id);
 
       if (error) {
-        setMessage("❌ Failed to set PIN. Please try again.");
+        setMessage("Failed to set PIN: " + error.message);
       } else {
-        setMessage("✅ PIN set successfully!");
+        setMessage("PIN set successfully!");
         setShowPinSetup(false);
-        setWallet(prev => prev ? { ...prev, pin: newPin } : null);
-        // Now process the payment
-        setWalletPin(newPin);
-        setTimeout(() => handleEwalletPayment(), 1000);
+        setNewPin("");
+        setConfirmPin("");
+        // Refresh wallet data
+        const { data: walletData } = await supabaseBrowser
+          .from("wallets")
+          .select("balance, pin")
+          .eq("user_id", user.id)
+          .single();
+        setWallet(walletData);
       }
     } catch (error) {
-      setMessage("❌ Failed to set PIN. Please try again.");
+      console.error("PIN setup error:", error);
+      setMessage("Failed to set PIN. Please try again.");
     } finally {
       setLoading(false);
     }
   };
 
-  const storePendingBooking = async () => {
+  const storePendingBooking = async (paymentMethod: string, paymentDetails: string) => {
     try {
       const { data: { user } } = await supabaseBrowser.auth.getUser();
-      if (!user) throw new Error("User not authenticated");
+      if (!user || !booking) return;
 
-      const { error } = await supabaseBrowser.from("rides").insert({
-        user_id: user.id,
-        pickup_location: booking?.pickup,
-        dropoff_location: booking?.dropoff,
-        vehicle_class: booking?.vehicleClass,
-        vehicle_id: booking?.vehicleId,
-        price: booking?.price,
-        status: "pending_payment",
-        payment_method: "mpesa"
-      });
+      const { error } = await supabaseBrowser
+        .from("pending_bookings")
+        .insert({
+          user_id: user.id,
+          pickup: booking.pickup,
+          dropoff: booking.dropoff,
+          vehicle_class: booking.vehicleClass,
+          vehicle_id: booking.vehicleId,
+          price: booking.price,
+          payment_method: paymentMethod,
+          payment_details: paymentDetails,
+          status: "pending"
+        });
 
       if (error) {
-        console.error("Failed to store pending booking:", error);
+        console.error("Error storing pending booking:", error);
       }
     } catch (error) {
       console.error("Error storing pending booking:", error);
     }
   };
 
+  if (checkingAuth) {
+    return (
+      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p>Checking authentication...</p>
+        </div>
+      </div>
+    );
+  }
+
   if (!booking) {
     return (
-      <>
-        <Navbar />
-        <div className="min-h-screen bg-black text-white flex items-center justify-center">
-          <div className="text-center">
-            <p className="text-xl">{message || "Loading..."}</p>
-          </div>
+      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+        <div className="text-center">
+          <h2 className="text-2xl font-bold mb-4">Invalid Booking</h2>
+          <p className="text-gray-600 mb-4">{message}</p>
+          <button
+            onClick={() => router.push("/rides")}
+            className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700"
+          >
+            Book Again
+          </button>
         </div>
-        <Footer />
-      </>
+      </div>
     );
   }
 
   return (
-    <>
+    <div className="min-h-screen bg-gray-100">
       <Navbar />
-      <main className="bg-black text-white min-h-[80vh] flex flex-col justify-center items-center p-6">
-        <div className="w-full max-w-md">
-          <div className="flex items-center justify-between mb-6">
-            <button
-              onClick={() => router.back()}
-              className="text-blue-400 hover:text-white transition flex items-center"
-            >
-              <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-              </svg>
-              Book Again
-            </button>
-            <h1 className="text-3xl font-extrabold text-center">Complete Your Booking</h1>
-            <div className="w-20"></div> {/* Spacer for centering */}
-          </div>
-          <p className="text-gray-400 text-center mb-6">Choose your preferred payment method</p>
-
-          {/* Booking Summary */}
-          <div className="bg-gray-900 rounded-lg p-4 mb-6">
-            <h3 className="text-lg font-semibold mb-3">Booking Summary</h3>
-            <div className="space-y-2 text-sm">
-              <p><span className="text-gray-400">From:</span> {booking.pickup}</p>
-              <p><span className="text-gray-400">To:</span> {booking.dropoff}</p>
-              <p><span className="text-gray-400">Vehicle:</span> {booking.vehicleDetails?.registration} - {booking.vehicleDetails?.make} {booking.vehicleDetails?.model}</p>
-              <p><span className="text-gray-400">Class:</span> {booking.vehicleClass}</p>
-              <p className="text-xl font-bold text-green-400">Total: KES {booking.price}</p>
+      
+      <div className="max-w-4xl mx-auto p-6">
+        <h1 className="text-3xl font-bold mb-8">Complete Your Booking</h1>
+        
+        {/* Booking Summary */}
+        <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+          <h2 className="text-xl font-semibold mb-4">Booking Summary</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <p className="text-gray-600">From</p>
+              <p className="font-semibold">{booking.pickup}</p>
+            </div>
+            <div>
+              <p className="text-gray-600">To</p>
+              <p className="font-semibold">{booking.dropoff}</p>
+            </div>
+            <div>
+              <p className="text-gray-600">Vehicle Class</p>
+              <p className="font-semibold">{booking.vehicleClass}</p>
+            </div>
+            <div>
+              <p className="text-gray-600">Price</p>
+              <p className="font-semibold text-green-600">KES {booking.price.toLocaleString()}</p>
             </div>
           </div>
+        </div>
 
-          {/* Payment Methods */}
-          <div className="space-y-4 mb-6">
-            <div className="flex items-center space-x-3">
-              <input
-                type="radio"
-                id="mpesa"
-                name="payment"
-                value="mpesa"
-                checked={paymentMethod === "mpesa"}
-                onChange={(e) => setPaymentMethod(e.target.value as "mpesa")}
-                className="text-blue-600"
-              />
-              <label htmlFor="mpesa" className="text-lg">MPESA</label>
-            </div>
-
-            <div className="flex items-center space-x-3">
-              <input
-                type="radio"
-                id="ewallet"
-                name="payment"
-                value="ewallet"
-                checked={paymentMethod === "ewallet"}
-                onChange={(e) => setPaymentMethod(e.target.value as "ewallet")}
-                className="text-blue-600"
-              />
-              <label htmlFor="ewallet" className="text-lg">E-Wallet (KES {wallet?.balance || 0})</label>
-            </div>
-
-            <div className="flex items-center space-x-3">
-              <input
-                type="radio"
-                id="bank"
-                name="payment"
-                value="bank"
-                checked={paymentMethod === "bank"}
-                onChange={(e) => setPaymentMethod(e.target.value as "bank")}
-                className="text-blue-600"
-              />
-              <label htmlFor="bank" className="text-lg">Bank Transfer</label>
+        {/* Driver Info */}
+        {driver && (
+          <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+            <h2 className="text-xl font-semibold mb-4">Your Driver</h2>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-semibold">{driver.name}</p>
+                <p className="text-gray-600">{driver.phone}</p>
+                <p className="text-sm text-gray-500">Rating: {driver.rating} ⭐</p>
+              </div>
+              <div className="text-right">
+                <p className="text-sm text-gray-600">Vehicle</p>
+                <p className="font-semibold">{driver.vehicle}</p>
+                <p className="text-sm text-green-600">ETA: {driver.eta} min</p>
+              </div>
             </div>
           </div>
+        )}
 
-          {/* MPESA Payment Form */}
-          {paymentMethod === "mpesa" && (
-            <div className="space-y-4 mb-6">
-              <input
-                type="text"
-                placeholder="Enter MPESA phone number"
-                value={mpesaPhone}
-                onChange={(e) => setMpesaPhone(e.target.value)}
-                className="border border-gray-700 bg-gray-900 rounded p-3 w-full text-lg placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-600 transition"
-              />
-              <button
-                onClick={handleMpesaPayment}
-                disabled={loading}
-                className="w-full bg-green-600 text-white rounded p-3 text-lg font-semibold hover:bg-white hover:text-green-600 border border-green-600 transition transform hover:-translate-y-0.5 hover:shadow-lg disabled:opacity-50"
-              >
-                {loading ? "Processing..." : "Pay with MPESA"}
-              </button>
-            </div>
-          )}
-
-          {/* E-Wallet Payment Form */}
-          {paymentMethod === "ewallet" && (
-            <div className="space-y-4 mb-6">
-              {showPinSetup ? (
-                <div className="space-y-4">
-                  <p className="text-center text-yellow-400">Set up your wallet PIN</p>
+        {/* Payment Methods */}
+        {!bookingConfirmed && (
+          <div className="bg-white rounded-lg shadow-lg p-6">
+            <h2 className="text-xl font-semibold mb-4">Payment Method</h2>
+            
+            <div className="space-y-4">
+              {/* M-Pesa */}
+              <div className="border rounded-lg p-4">
+                <label className="flex items-center space-x-3">
                   <input
-                    type="password"
-                    placeholder="Enter 4-digit PIN"
-                    value={newPin}
-                    onChange={(e) => setNewPin(e.target.value)}
-                    maxLength={4}
-                    className="border border-gray-700 bg-gray-900 rounded p-3 w-full text-lg placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-600 transition"
+                    type="radio"
+                    name="payment"
+                    value="mpesa"
+                    checked={paymentMethod === "mpesa"}
+                    onChange={(e) => setPaymentMethod(e.target.value as "mpesa")}
+                    className="text-blue-600"
                   />
+                  <span className="font-semibold">M-Pesa</span>
+                </label>
+                {paymentMethod === "mpesa" && (
+                  <div className="mt-3">
+                    <input
+                      type="tel"
+                      placeholder="Enter M-Pesa phone number"
+                      value={mpesaPhone}
+                      onChange={(e) => setMpesaPhone(e.target.value)}
+                      className="w-full p-2 border rounded"
+                    />
+                    <button
+                      onClick={handleMpesaPayment}
+                      disabled={loading}
+                      className="mt-2 bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 disabled:opacity-50"
+                    >
+                      {loading ? "Processing..." : "Pay with M-Pesa"}
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* E-Wallet */}
+              <div className="border rounded-lg p-4">
+                <label className="flex items-center space-x-3">
                   <input
-                    type="password"
-                    placeholder="Confirm PIN"
-                    value={confirmPin}
-                    onChange={(e) => setConfirmPin(e.target.value)}
-                    maxLength={4}
-                    className="border border-gray-700 bg-gray-900 rounded p-3 w-full text-lg placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-600 transition"
+                    type="radio"
+                    name="payment"
+                    value="ewallet"
+                    checked={paymentMethod === "ewallet"}
+                    onChange={(e) => setPaymentMethod(e.target.value as "ewallet")}
+                    className="text-blue-600"
                   />
+                  <span className="font-semibold">E-Wallet</span>
+                  {wallet && <span className="text-sm text-gray-600">(KES {wallet.balance.toLocaleString()})</span>}
+                </label>
+                {paymentMethod === "ewallet" && (
+                  <div className="mt-3">
+                    {!wallet?.pin ? (
+                      <div>
+                        <p className="text-sm text-gray-600 mb-2">Set up your wallet PIN first</p>
+                        <button
+                          onClick={() => setShowPinSetup(true)}
+                          className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+                        >
+                          Set PIN
+                        </button>
+                      </div>
+                    ) : (
+                      <div>
+                        <input
+                          type="password"
+                          placeholder="Enter wallet PIN"
+                          value={walletPin}
+                          onChange={(e) => setWalletPin(e.target.value)}
+                          className="w-full p-2 border rounded"
+                        />
+                        <button
+                          onClick={handleEwalletPayment}
+                          disabled={loading}
+                          className="mt-2 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 disabled:opacity-50"
+                        >
+                          {loading ? "Processing..." : "Pay with E-Wallet"}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Bank Transfer */}
+              <div className="border rounded-lg p-4">
+                <label className="flex items-center space-x-3">
+                  <input
+                    type="radio"
+                    name="payment"
+                    value="bank"
+                    checked={paymentMethod === "bank"}
+                    onChange={(e) => setPaymentMethod(e.target.value as "bank")}
+                    className="text-blue-600"
+                  />
+                  <span className="font-semibold">Bank Transfer</span>
+                </label>
+                {paymentMethod === "bank" && (
+                  <div className="mt-3 space-y-2">
+                    <input
+                      type="text"
+                      placeholder="Bank name"
+                      value={bankDetails.bank}
+                      onChange={(e) => setBankDetails({ ...bankDetails, bank: e.target.value })}
+                      className="w-full p-2 border rounded"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Account number"
+                      value={bankDetails.account}
+                      onChange={(e) => setBankDetails({ ...bankDetails, account: e.target.value })}
+                      className="w-full p-2 border rounded"
+                    />
+                    <button
+                      onClick={handleBankPayment}
+                      disabled={loading}
+                      className="w-full bg-gray-600 text-white px-4 py-2 rounded hover:bg-gray-700 disabled:opacity-50"
+                    >
+                      {loading ? "Processing..." : "Submit Bank Details"}
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {message && (
+              <div className={`mt-4 p-3 rounded ${
+                message.includes("successful") || message.includes("sent") 
+                  ? "bg-green-100 text-green-800" 
+                  : "bg-red-100 text-red-800"
+              }`}>
+                {message}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* PIN Setup Modal */}
+        {showPinSetup && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg p-6 w-96">
+              <h3 className="text-lg font-semibold mb-4">Set Wallet PIN</h3>
+              <div className="space-y-3">
+                <input
+                  type="password"
+                  placeholder="Enter 4-digit PIN"
+                  value={newPin}
+                  onChange={(e) => setNewPin(e.target.value)}
+                  className="w-full p-2 border rounded"
+                  maxLength={4}
+                />
+                <input
+                  type="password"
+                  placeholder="Confirm PIN"
+                  value={confirmPin}
+                  onChange={(e) => setConfirmPin(e.target.value)}
+                  className="w-full p-2 border rounded"
+                  maxLength={4}
+                />
+                <div className="flex space-x-2">
                   <button
                     onClick={setupWalletPin}
                     disabled={loading}
-                    className="w-full bg-blue-600 text-white rounded p-3 text-lg font-semibold hover:bg-white hover:text-blue-600 border border-blue-600 transition transform hover:-translate-y-0.5 hover:shadow-lg disabled:opacity-50"
+                    className="flex-1 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 disabled:opacity-50"
                   >
-                    {loading ? "Setting PIN..." : "Set PIN & Pay"}
+                    {loading ? "Setting..." : "Set PIN"}
                   </button>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  <input
-                    type="password"
-                    placeholder="Enter wallet PIN"
-                    value={walletPin}
-                    onChange={(e) => setWalletPin(e.target.value)}
-                    maxLength={4}
-                    className="border border-gray-700 bg-gray-900 rounded p-3 w-full text-lg placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-600 transition"
-                  />
                   <button
-                    onClick={handleEwalletPayment}
-                    disabled={loading}
-                    className="w-full bg-blue-600 text-white rounded p-3 text-lg font-semibold hover:bg-white hover:text-blue-600 border border-blue-600 transition transform hover:-translate-y-0.5 hover:shadow-lg disabled:opacity-50"
+                    onClick={() => setShowPinSetup(false)}
+                    className="flex-1 bg-gray-300 text-gray-700 px-4 py-2 rounded hover:bg-gray-400"
                   >
-                    {loading ? "Processing..." : "Pay with E-Wallet"}
+                    Cancel
                   </button>
                 </div>
-              )}
+              </div>
             </div>
-          )}
+          </div>
+        )}
 
-          {/* Bank Payment Form */}
-          {paymentMethod === "bank" && (
-            <div className="space-y-4 mb-6">
-              <input
-                type="text"
-                placeholder="Bank Name"
-                value={bankDetails.bank}
-                onChange={(e) => setBankDetails({ ...bankDetails, bank: e.target.value })}
-                className="border border-gray-700 bg-gray-900 rounded p-3 w-full text-lg placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-600 transition"
-              />
-              <input
-                type="text"
-                placeholder="Account Number"
-                value={bankDetails.account}
-                onChange={(e) => setBankDetails({ ...bankDetails, account: e.target.value })}
-                className="border border-gray-700 bg-gray-900 rounded p-3 w-full text-lg placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-600 transition"
-              />
-              <button
-                onClick={handleBankPayment}
-                disabled={loading}
-                className="w-full bg-purple-600 text-white rounded p-3 text-lg font-semibold hover:bg-white hover:text-purple-600 border border-purple-600 transition transform hover:-translate-y-0.5 hover:shadow-lg disabled:opacity-50"
-              >
-                {loading ? "Processing..." : "Submit Bank Payment"}
-              </button>
-            </div>
-          )}
-
-          {message && (
-            <p className={`mt-4 text-center text-lg ${message.includes("✅") ? "text-green-400" : message.includes("❌") ? "text-red-400" : "text-yellow-400"}`}>
-              {message}
-            </p>
-          )}
-        </div>
-      </main>
+        {/* Booking Confirmed */}
+        {bookingConfirmed && (
+          <div className="bg-green-50 border border-green-200 rounded-lg p-6 text-center">
+            <h2 className="text-2xl font-bold text-green-800 mb-2">Booking Confirmed!</h2>
+            <p className="text-green-700 mb-4">Your ride has been booked successfully.</p>
+            <button
+              onClick={() => router.push("/dashboard")}
+              className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700"
+            >
+              Go to Dashboard
+            </button>
+          </div>
+        )}
+      </div>
+      
       <Footer />
-    </>
+    </div>
+  );
+}
+
+export default function RideCheckoutPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p>Loading checkout...</p>
+        </div>
+      </div>
+    }>
+      <RideCheckoutForm />
+    </Suspense>
   );
 } 

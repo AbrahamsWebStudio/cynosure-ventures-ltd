@@ -1,12 +1,25 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
-import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
-import { Camera, Barcode, Type, Package, Printer } from 'lucide-react';
-import PhysicalBarcodeScanner from '@/components/PhysicalBarcodeScanner';
-import ReceiptPrinter from '@/components/ReceiptPrinter';
+import { useState, useEffect } from "react";
+import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { AlertTriangle, Package, Scale } from "lucide-react";
+
+interface Product {
+  name: string;
+  description: string;
+  price: string;
+  stock: string;
+  category: string;
+  barcode: string;
+  weight_kg: string;
+  dimensions_cm: string;
+  is_fragile: boolean;
+  weight_class_id: string | null;
+}
 
 interface BarcodeData {
   code: string;
@@ -14,191 +27,185 @@ interface BarcodeData {
   timestamp: Date;
 }
 
+interface WeightClass {
+  id: string;
+  name: string;
+  min_weight: number;
+  max_weight: number;
+  description: string;
+}
+
 export default function AddProductPage() {
   const supabase = createClientComponentClient();
-  const [newProduct, setNewProduct] = useState({
-    title: '',
+  const [newProduct, setNewProduct] = useState<Product>({
+    name: '',
     description: '',
     price: '',
-    category: '',
     stock: '',
+    category: '',
     barcode: '',
+    weight_kg: '',
+    dimensions_cm: '',
+    is_fragile: false,
+    weight_class_id: null,
   });
-  const [adding, setAdding] = useState(false);
-  const [inputMode, setInputMode] = useState<'manual' | 'barcode'>('manual');
-  const [scannedBarcodes, setScannedBarcodes] = useState<BarcodeData[]>([]);
-  const [showScanner, setShowScanner] = useState(false);
-  const [showReceiptPrinter, setShowReceiptPrinter] = useState(false);
-  const [receiptData, setReceiptData] = useState<any>(null);
+  const [weightClasses, setWeightClasses] = useState<WeightClass[]>([]);
+  const [selectedWeightClass, setSelectedWeightClass] = useState<string>('');
+  const [loading, setLoading] = useState(false);
+  const [barcodeData, setBarcodeData] = useState<BarcodeData | null>(null);
+
+  const fetchWeightClasses = async () => {
+    const { data } = await supabase
+      .from('weight_classes')
+      .select('*')
+      .order('min_weight');
+    setWeightClasses(data || []);
+  };
+
+  useEffect(() => {
+    fetchWeightClasses();
+  }, []);
 
   const handleBarcodeScan = (barcode: string) => {
-    const barcodeData: BarcodeData = {
+    setNewProduct({ ...newProduct, barcode });
+    setBarcodeData({
       code: barcode,
-      format: 'EAN-13',
-      timestamp: new Date()
-    };
-    
-    setScannedBarcodes(prev => [...prev, barcodeData]);
-    setNewProduct(prev => ({ ...prev, barcode: barcode }));
-    setShowScanner(false);
+      format: 'CODE128',
+      timestamp: new Date(),
+    });
   };
 
   const handleManualBarcodeInput = (value: string) => {
-    setNewProduct(prev => ({ ...prev, barcode: value }));
+    setNewProduct({ ...newProduct, barcode: value });
+  };
+
+  const handleWeightChange = (weight: string) => {
+    setNewProduct({ ...newProduct, weight_kg: weight });
+    
+    // Auto-select weight class based on weight
+    const weightNum = parseFloat(weight);
+    if (!isNaN(weightNum)) {
+      const matchingClass = weightClasses.find(wc => 
+        weightNum >= wc.min_weight && weightNum <= wc.max_weight
+      );
+      if (matchingClass) {
+        setSelectedWeightClass(matchingClass.id);
+        setNewProduct(prev => ({ ...prev, weight_class_id: matchingClass.id }));
+      }
+    }
   };
 
   const handleAddProduct = async () => {
-    if (!newProduct.title || !newProduct.price || !newProduct.category || !newProduct.stock) {
-      alert('Please fill in all required fields.');
-      return;
-    }
-    setAdding(true);
-
-    const priceParsed = parseFloat(newProduct.price);
-    const stockParsed = parseInt(newProduct.stock);
-
-    if (isNaN(priceParsed) || isNaN(stockParsed)) {
-      alert('Price and Stock must be valid numbers.');
-      setAdding(false);
+    if (!newProduct.name || !newProduct.price || !newProduct.stock || !newProduct.category) {
+      alert('Please fill in all required fields');
       return;
     }
 
-    const { error } = await supabase.from('products').insert([{
-      title: newProduct.title,
-      description: newProduct.description || null,
-      price: priceParsed,
-      category: newProduct.category,
-      stock: stockParsed,
-      barcode: newProduct.barcode || null,
-    }]);
+    setLoading(true);
 
-    if (error) {
-      alert('Error adding product: ' + error.message);
-    } else {
-      setNewProduct({ title: '', description: '', price: '', category: '', stock: '', barcode: '' });
-      setScannedBarcodes([]);
-      alert('Product added successfully!');
+    try {
+      const { error } = await supabase
+        .from('products')
+        .insert({
+          name: newProduct.name,
+          description: newProduct.description,
+          price: parseFloat(newProduct.price),
+          stock: parseInt(newProduct.stock),
+          category: newProduct.category,
+          barcode: newProduct.barcode,
+          weight_kg: parseFloat(newProduct.weight_kg) || 0,
+          dimensions_cm: newProduct.dimensions_cm,
+          is_fragile: newProduct.is_fragile,
+          weight_class_id: selectedWeightClass || null,
+        });
+
+      if (error) {
+        console.error('Error adding product:', error);
+        alert('Error adding product: ' + error.message);
+      } else {
+        alert('Product added successfully!');
+        // Reset form
+        setNewProduct({
+          name: '',
+          description: '',
+          price: '',
+          stock: '',
+          category: '',
+          barcode: '',
+          weight_kg: '',
+          dimensions_cm: '',
+          is_fragile: false,
+          weight_class_id: null,
+        });
+        setSelectedWeightClass('');
+        setBarcodeData(null);
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      alert('Error adding product. Please try again.');
+    } finally {
+      setLoading(false);
     }
-
-    setAdding(false);
   };
 
   const simulateBarcodeScan = () => {
-    // Generate a random barcode for demonstration
-    const barcode = '1234567890123';
-    handleBarcodeScan(barcode);
+    const mockBarcode = '1234567890123';
+    handleBarcodeScan(mockBarcode);
   };
 
   return (
-    <>
-      <main className="max-w-4xl mx-auto p-4 space-y-6">
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Add Product</h1>
-          <p className="text-gray-600">Add new products to your inventory with barcode scanning support</p>
-        </div>
-
-        {/* Input Mode Toggle */}
-        <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-          <div className="flex items-center justify-center space-x-4 mb-6">
-            <button
-              onClick={() => setInputMode('manual')}
-              className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition ${
-                inputMode === 'manual' 
-                  ? 'bg-blue-600 text-white' 
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-            >
-              <Type className="h-5 w-5" />
-              <span>Manual Input</span>
-            </button>
-            <button
-              onClick={() => setInputMode('barcode')}
-              className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition ${
-                inputMode === 'barcode' 
-                  ? 'bg-blue-600 text-white' 
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-            >
-              <Barcode className="h-5 w-5" />
-              <span>Barcode Scanner</span>
-            </button>
-          </div>
-
+    <div className="min-h-screen bg-gray-50 p-6">
+      <div className="max-w-4xl mx-auto">
+        <h1 className="text-3xl font-bold text-center mb-8">Add New Product</h1>
+        
+        <div className="bg-white rounded-lg shadow-lg p-6">
           {/* Barcode Scanner Section */}
-          {inputMode === 'barcode' && (
+          <div className="mb-6 p-4 border border-gray-200 rounded-lg">
+            <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+              <Package className="h-5 w-5" />
+              Barcode Scanner
+            </h2>
+            
             <div className="space-y-4">
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                <h3 className="font-semibold text-blue-900 mb-2">Syble Barcode Scanner</h3>
-                <p className="text-blue-700 text-sm mb-4">
-                  Use your Syble USB barcode scanner to scan product barcodes or manually enter the barcode number.
-                </p>
-                
-                <div className="flex space-x-3">
-                  <Button
-                    onClick={() => setShowScanner(true)}
-                    className="flex items-center space-x-2"
-                  >
-                    <Barcode className="h-4 w-4" />
-                    <span>Start Scanner</span>
-                  </Button>
-                  
-                  <Button
-                    onClick={simulateBarcodeScan}
-                    variant="outline"
-                    className="flex items-center space-x-2"
-                  >
-                    <Package className="h-4 w-4" />
-                    <span>Simulate Scan</span>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Barcode
+                </label>
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Scan or enter barcode manually"
+                    value={newProduct.barcode}
+                    onChange={(e) => handleManualBarcodeInput(e.target.value)}
+                  />
+                  <Button onClick={simulateBarcodeScan} variant="outline">
+                    Simulate Scan
                   </Button>
                 </div>
               </div>
-
-              {/* Manual Barcode Input */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Barcode Number
-                </label>
-                <Input
-                  placeholder="Enter barcode manually or scan above"
-                  value={newProduct.barcode}
-                  onChange={(e) => handleManualBarcodeInput(e.target.value)}
-                  className="w-full"
-                />
-              </div>
-
-              {/* Scanned Barcodes History */}
-              {scannedBarcodes.length > 0 && (
-                <div className="bg-gray-50 rounded-lg p-4">
-                  <h4 className="font-medium text-gray-900 mb-2">Recent Scans</h4>
-                  <div className="space-y-2">
-                    {scannedBarcodes.slice(-3).map((scan, index) => (
-                      <div key={index} className="flex justify-between items-center text-sm">
-                        <span className="font-mono">{scan.code}</span>
-                        <span className="text-gray-500">
-                          {scan.timestamp.toLocaleTimeString()}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
+              
+              {barcodeData && (
+                <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
+                  <p className="text-sm text-green-800">
+                    <strong>Scanned:</strong> {barcodeData.code} ({barcodeData.format})
+                  </p>
+                  <p className="text-xs text-green-600">
+                    {barcodeData.timestamp.toLocaleString()}
+                  </p>
                 </div>
               )}
             </div>
-          )}
-        </div>
+          </div>
 
-        {/* Product Form */}
-        <div className="bg-white rounded-lg shadow-md p-6">
-          <h2 className="text-xl font-semibold mb-4">Product Details</h2>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+          {/* Product Details Form */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Product Title *
+                Product Name *
               </label>
               <Input
-                placeholder="Enter product title"
-                value={newProduct.title}
-                onChange={(e) => setNewProduct({ ...newProduct, title: e.target.value })}
+                placeholder="Enter product name"
+                value={newProduct.name}
+                onChange={(e) => setNewProduct({ ...newProduct, name: e.target.value })}
               />
             </div>
             
@@ -236,64 +243,95 @@ export default function AddProductPage() {
                 onChange={(e) => setNewProduct({ ...newProduct, stock: e.target.value })}
               />
             </div>
+
+            {/* Weight and Dimensions Section */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-1">
+                <Scale className="h-4 w-4" />
+                Weight (kg) *
+              </label>
+              <Input
+                type="number"
+                step="0.01"
+                placeholder="0.00"
+                value={newProduct.weight_kg}
+                onChange={(e) => handleWeightChange(e.target.value)}
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-1">
+                <Package className="h-4 w-4" />
+                Dimensions (cm)
+              </label>
+              <Input
+                placeholder="LxWxH (e.g., 30x20x10)"
+                value={newProduct.dimensions_cm}
+                onChange={(e) => setNewProduct({ ...newProduct, dimensions_cm: e.target.value })}
+              />
+            </div>
+
+            {/* Weight Class Selection */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Weight Class
+              </label>
+              <Select value={selectedWeightClass} onValueChange={setSelectedWeightClass}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select weight class" />
+                </SelectTrigger>
+                <SelectContent>
+                  {weightClasses.map((wc) => (
+                    <SelectItem key={wc.id} value={wc.id}>
+                      {wc.name} ({wc.min_weight}-{wc.max_weight}kg)
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Fragile Handling */}
+            <div className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-orange-600" />
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Fragile Item</label>
+                  <p className="text-xs text-gray-500">Requires special handling</p>
+                </div>
+              </div>
+              <Switch
+                checked={newProduct.is_fragile}
+                onCheckedChange={(checked) => setNewProduct({ ...newProduct, is_fragile: checked })}
+              />
+            </div>
           </div>
-          
-          <div className="mb-4">
+
+          {/* Description and Special Handling */}
+          <div className="mb-6">
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Description (Optional)
+              Description
             </label>
             <textarea
-              placeholder="Enter product description..."
+              placeholder="Product description..."
               value={newProduct.description}
               onChange={(e) => setNewProduct({ ...newProduct, description: e.target.value })}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               rows={3}
             />
           </div>
 
-          <Button 
-            onClick={handleAddProduct} 
-            disabled={adding || !newProduct.title || !newProduct.price || !newProduct.category || !newProduct.stock}
-            className="w-full"
-          >
-            {adding ? 'Adding Product...' : 'Add Product'}
-          </Button>
+          {/* Submit Button */}
+          <div className="flex justify-end">
+            <Button 
+              onClick={handleAddProduct} 
+              disabled={loading}
+              className="px-8 py-2"
+            >
+              {loading ? 'Adding Product...' : 'Add Product'}
+            </Button>
+          </div>
         </div>
-
-        {/* Instructions */}
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <h3 className="font-semibold text-blue-900 mb-2">How to Use Syble Barcode Scanner</h3>
-          <ol className="text-blue-700 text-sm space-y-1">
-            <li>1. Connect Syble scanner via USB to your computer</li>
-            <li>2. Click "Barcode Scanner" mode above</li>
-            <li>3. Click "Start Scanner" to activate scanner</li>
-            <li>4. Point scanner at product barcode and press trigger</li>
-            <li>5. Or use "Simulate Scan" for testing</li>
-            <li>6. Fill in remaining product details</li>
-            <li>7. Click "Add Product" to save</li>
-          </ol>
-        </div>
-      </main>
-
-      {/* Physical Barcode Scanner Modal */}
-      <PhysicalBarcodeScanner
-        isOpen={showScanner}
-        onScan={handleBarcodeScan}
-        onClose={() => setShowScanner(false)}
-      />
-
-      {/* Receipt Printer Modal */}
-      {showReceiptPrinter && receiptData && (
-        <ReceiptPrinter
-          isOpen={showReceiptPrinter}
-          receiptData={receiptData}
-          onPrint={(data) => {
-            console.log('Receipt printed:', data);
-            setShowReceiptPrinter(false);
-          }}
-          onClose={() => setShowReceiptPrinter(false)}
-        />
-      )}
-    </>
+      </div>
+    </div>
   );
 }

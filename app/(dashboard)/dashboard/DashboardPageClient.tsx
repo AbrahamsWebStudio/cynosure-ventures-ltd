@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { createPagesBrowserClient } from "@supabase/auth-helpers-nextjs";
 import Link from "next/link";
 import Navbar from "@/components/Navbar";
+import QuickBooking from "@/components/QuickBooking";
+import RideHistory from "@/components/RideHistory";
 import { useRouter } from "next/navigation";
 import { Bar } from "react-chartjs-2";
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Tooltip } from "chart.js";
@@ -39,9 +41,6 @@ export default function DashboardPageClient({ user, session }: DashboardPageClie
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [loggingOut, setLoggingOut] = useState(false);
-  const [topUpAmount, setTopUpAmount] = useState<number>(0);
-  const [phone, setPhone] = useState<string>("");
-
   const [fullNameInput, setFullNameInput] = useState("");
   const [phoneInput, setPhoneInput] = useState("");
 
@@ -54,7 +53,6 @@ export default function DashboardPageClient({ user, session }: DashboardPageClie
         .select("*")
         .eq("id", userId)
         .single();
-
 
       if (profileError) {
         console.warn("Profile missing, inserting...");
@@ -102,280 +100,237 @@ export default function DashboardPageClient({ user, session }: DashboardPageClie
 
   useEffect(() => {
     fetchData();
-  }, []);
 
-  // Realtime wallet and transaction updates
-  useEffect(() => {
+    // Set up real-time subscription for wallet updates
     const channel = supabase
-      .channel('dashboard-updates')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'wallets' }, (payload) => {
-        if (payload.new) {
-          setWallet(payload.new as { balance: number });
-        }
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions' }, (payload) => {
-        if (payload.new) {
-          // Refresh data when new transactions occur
+      .channel("wallet_updates")
+      .on("postgres_changes", { event: "*", schema: "public", table: "wallets" }, () => {
           fetchData();
-        }
       })
       .subscribe();
     
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [supabase]);
+  }, [userId]);
 
   const handleLogout = async () => {
     setLoggingOut(true);
     await supabase.auth.signOut();
-    router.push("/login");
+    router.push("/");
   };
 
   const handleProfileComplete = async () => {
-    if (!fullNameInput || !phoneInput) {
-      alert("Please fill in all fields.");
-      return;
-    }
     const { error } = await supabase
       .from("profiles")
       .update({
         full_name: fullNameInput,
         phone_number: phoneInput,
       })
-      .eq("id", profile?.id);
+      .eq("id", userId);
 
     if (error) {
-      alert(`Error: ${error.message}`);
+      console.error("Error updating profile:", error);
     } else {
-      alert("Profile updated!");
-      fetchData();
-    }
-  };
-
-  const handleTopUp = async () => {
-    if (!phone || !topUpAmount) {
-      alert("Please enter phone number and amount");
-      return;
-    }
-    try {
-      const res = await fetch("/api/mpesa/stk-push", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone, amount: topUpAmount }),
-      });
-      const data = await res.json();
-      console.log(data);
-      alert("STK Push initiated, check your phone!");
-    } catch (error) {
-      console.error("MPESA top-up error:", error);
-      alert("Failed to initiate MPESA top-up.");
+      setProfile({ ...profile!, full_name: fullNameInput, phone_number: phoneInput });
     }
   };
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-black text-white">
-        <p className="animate-pulse">Loading your dashboard...</p>
+      <>
+        <Navbar />
+        <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+          <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+            <div className="animate-pulse">
+              <div className="h-8 bg-gray-200 dark:bg-gray-700 rounded w-1/4 mb-6"></div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="h-32 bg-gray-200 dark:bg-gray-700 rounded"></div>
+                ))}
+              </div>
+            </div>
+          </div>
       </div>
+      </>
     );
   }
 
-  const spendingData = {
-    labels: orders.slice(0, 5).map((order) => order.id.slice(0, 6)),
+  const chartData = {
+    labels: ["Jan", "Feb", "Mar", "Apr", "May", "Jun"],
     datasets: [
       {
-        label: "Amount (KES)",
-        data: orders.slice(0, 5).map((order) => order.total_amount),
-        backgroundColor: "rgba(37, 99, 235, 0.6)",
+        label: "Orders",
+        data: [12, 19, 3, 5, 2, 3],
+        backgroundColor: "rgba(59, 130, 246, 0.5)",
+        borderColor: "rgba(59, 130, 246, 1)",
+        borderWidth: 1,
       },
     ],
   };
 
-  const needsProfileCompletion = !profile?.full_name || !profile?.phone_number;
-
   return (
     <>
-      {needsProfileCompletion && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded p-6 max-w-sm w-full text-center">
-            <h2 className="text-xl font-bold mb-2 text-gray-900">Complete Your Profile</h2>
+      <Navbar />
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+        <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+          {/* Header */}
+          <div className="mb-8">
+            <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
+              Welcome back, {profile?.full_name || user.email}!
+            </h1>
+            <p className="text-gray-600 dark:text-gray-400 mt-2">
+              Here's what's happening with your account
+            </p>
+          </div>
+
+          {/* Stats Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+              <div className="flex items-center">
+                <div className="p-2 bg-blue-100 dark:bg-blue-900 rounded-lg">
+                  <svg className="w-6 h-6 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1" />
+                  </svg>
+                </div>
+                <div className="ml-4">
+                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Wallet Balance</p>
+                  <p className="text-2xl font-bold text-gray-900 dark:text-white">KES {wallet?.balance?.toLocaleString() || 0}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+              <div className="flex items-center">
+                <div className="p-2 bg-green-100 dark:bg-green-900 rounded-lg">
+                  <svg className="w-6 h-6 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                </div>
+                <div className="ml-4">
+                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Total Orders</p>
+                  <p className="text-2xl font-bold text-gray-900 dark:text-white">{orders.length}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+              <div className="flex items-center">
+                <div className="p-2 bg-purple-100 dark:bg-purple-900 rounded-lg">
+                  <svg className="w-6 h-6 text-purple-600 dark:text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                  </svg>
+                </div>
+                <div className="ml-4">
+                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Total Spent</p>
+                  <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                    KES {orders.reduce((sum, order) => sum + order.total_amount, 0).toLocaleString()}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+              <div className="flex items-center">
+                <div className="p-2 bg-yellow-100 dark:bg-yellow-900 rounded-lg">
+                  <svg className="w-6 h-6 text-yellow-600 dark:text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <div className="ml-4">
+                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Last Login</p>
+                  <p className="text-sm font-bold text-gray-900 dark:text-white">
+                    {user.last_sign_in_at ? new Date(user.last_sign_in_at).toLocaleDateString() : "N/A"}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Main Content Grid */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            {/* Quick Booking */}
+            <div className="lg:col-span-1">
+              <QuickBooking />
+            </div>
+
+            {/* Ride History */}
+            <div className="lg:col-span-2">
+              <RideHistory />
+            </div>
+          </div>
+
+          {/* Profile Section */}
+          <div className="mt-8 bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">Profile Information</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Full Name
+                </label>
             <input
               type="text"
-              placeholder="Full Name"
               value={fullNameInput}
               onChange={(e) => setFullNameInput(e.target.value)}
-              className="border rounded px-3 py-2 w-full mb-2 text-gray-900"
+                  className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Phone Number
+                </label>
             <input
-              type="tel"
-              placeholder="Phone Number"
+                  type="text"
               value={phoneInput}
               onChange={(e) => setPhoneInput(e.target.value)}
-              className="border rounded px-3 py-2 w-full mb-4 text-gray-900"
+                  className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
+              </div>
+            </div>
             <button
               onClick={handleProfileComplete}
-              className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition w-full"
+              className="mt-4 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
             >
-              Save and Continue
+              Update Profile
             </button>
           </div>
-        </div>
-      )}
-      <Navbar />
 
-      <div className="max-w-6xl mx-auto p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Welcome Section */}
-        <div className="p-6 rounded-lg shadow bg-white text-center hover:shadow-lg transition-transform hover:-translate-y-1 md:col-span-2">
-          <h2 className="text-3xl font-bold mb-2 text-gray-900">
-            Welcome back, {profile?.full_name ?? user?.email} 👋
-          </h2>
-          <p className="text-gray-700 mb-3">Manage your activities and wallet easily from your dashboard.</p>
-          <p className="text-sm text-gray-500">
-            Last login: {user?.last_sign_in_at ? new Date(user.last_sign_in_at).toLocaleString() : "N/A"}
-          </p>
+          {/* Chart Section */}
+          <div className="mt-8 bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">Order History</h2>
+            <div className="h-64">
+              <Bar data={chartData} options={{ maintainAspectRatio: false }} />
+        </div>
         </div>
         
-        {/* Wallet Balance and Top Up */}
-        <div className="p-6 rounded-lg shadow bg-white text-center hover:shadow-lg transition-transform hover:-translate-y-1">
-          <h2 className="text-2xl font-bold mb-2 text-gray-900">Wallet Balance</h2>
-          <p className="text-3xl font-bold text-green-600">KES {wallet?.balance ?? 0}</p>
-          <div className="mt-4 space-y-2">
-            <input
-              type="text"
-              placeholder="Enter MPESA phone number"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              className="border rounded px-3 py-2 w-full max-w-xs text-gray-900"
-            />
-            <input
-              type="number"
-              placeholder="Amount"
-              value={topUpAmount}
-              onChange={(e) => setTopUpAmount(Number(e.target.value))}
-              className="border rounded px-3 py-2 w-full max-w-xs text-gray-900"
-            />
-            <br />  
-            <button
-              onClick={async () => {
-                if (!phone || !topUpAmount) {
-                  alert("Please enter phone number and amount");
-                  return;
-                }
-                const res = await fetch("/api/mpesa/stk-push", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ phone, amount: topUpAmount }),
-                });
-                const data = await res.json();
-                console.log(data);
-                alert("STK Push initiated, check your phone!");
-              }}
-              className="mt-2 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition"
-            >
-              Top Up Wallet
-            </button>
-          </div>
-        </div>
-
-        {/* Quick Actions */}
-        <div className="p-6 rounded-lg shadow bg-white text-center hover:shadow-lg transition-transform hover:-translate-y-1">
-          <h2 className="text-2xl font-bold mb-4 text-gray-900">Quick Actions</h2>
-          <div className="grid grid-cols-1 gap-3">
-            {[
-              { text: "Shop Products", href: "/products" },
-              { text: "Book Delivery", href: "/deliveries" },
-              { text: "Book Ride", href: "/rides" },
-            ].map((action) => (
+          {/* Action Buttons */}
+          <div className="mt-8 flex flex-wrap gap-4">
               <Link
-                key={action.text}
-                href={action.href}
-                className="bg-blue-600 text-white rounded p-3 font-semibold hover:bg-white hover:text-blue-600 hover:border hover:border-blue-600 transition block"
+              href="/rides"
+              className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors"
               >
-                {action.text}
+              Book a Ride
               </Link>
-            ))}
-          </div>
-        </div>
-
-        {/* Spending Overview */}
-        <div className="p-6 rounded-lg shadow bg-white text-center hover:shadow-lg transition-transform hover:-translate-y-1">
-          <h2 className="text-2xl font-bold mb-4 text-gray-900">Recent Spending Overview</h2>
-          {orders.length === 0 ? (
-            <p className="text-gray-700">No orders yet to display chart.</p>
-          ) : (
-            <Bar
-              data={spendingData}
-              options={{ responsive: true, plugins: { legend: { display: false } } }}
-            />
-          )}
-        </div>
-
-        {/* Recent Orders */}
-        <div className="p-6 rounded-lg shadow bg-white hover:shadow-lg transition-transform hover:-translate-y-1">
-          <h2 className="text-2xl font-bold mb-4 text-gray-900">Recent Orders ({orders.length})</h2>
-          {orders.length === 0 ? (
-            <p className="text-gray-700">
-              <b>You have no orders yet. </b>{" "}
-              <Link href="/products" className="text-blue-600 underline hover:text-black transition">
-                Start shopping
+            <Link
+              href="/products"
+              className="bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 transition-colors"
+            >
+              Shop Products
               </Link>
-              .
-            </p>
-          ) : (
-            <div className="space-y-3 max-h-80 overflow-y-auto">
-              {orders.slice(0, 5).map((order) => (
-                <div
-                  key={order.id}
-                  className="flex justify-between items-center border border-gray-200 p-3 rounded hover:bg-gray-50 transition"
-                >
-                  <div>
-                    <p className="font-semibold text-gray-900">Order #{order.id.slice(0, 8)}</p>
-                    <p className="text-sm text-gray-700">{new Date(order.created_at).toLocaleString()}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-gray-900">KES {order.total_amount}</p>
-                    <p
-                      className={`text-sm ${order.status === "completed" ? "text-green-600" : "text-yellow-600"}`}
-                    >
-                      {order.status}
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Announcements */}
-        <div className="p-6 rounded-lg shadow bg-white text-center hover:shadow-lg transition-transform hover:-translate-y-1 md:col-span-2">
-          <h2 className="text-2xl font-bold mb-2 text-gray-900">Announcements</h2>
-          <p className="text-gray-700">
-            🚀 New feature: MPESA Top-Up now available! Try it now and simplify your payments.
-          </p>
-        </div>
-
-        {/* Support */}
-        <div className="p-6 rounded-lg shadow bg-white text-center hover:shadow-lg transition-transform hover:-translate-y-1 md:col-span-2">
-          <h2 className="text-2xl font-bold mb-2 text-gray-900">Need Help?</h2>
-          <p className="text-gray-700 mb-3">Contact us via WhatsApp, email, or call for instant support.</p>
-          <div className="flex justify-center gap-4 flex-wrap">
-            <Link href="https://wa.me/254700000000" className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 transition">WhatsApp</Link>
-            <Link href="mailto:support@cynosureventures.co.ke" className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition">Email</Link>
-            <Link href="tel:+254700000000" className="bg-gray-600 text-white px-4 py-2 rounded hover:bg-gray-700 transition">Call</Link>
-          </div>
-        </div>
-
-        {/* Logout */}
-        <div className="p-6 rounded-lg shadow text-center hover:shadow-lg transition-transform hover:-translate-y-1 md:col-span-2">
+            <Link
+              href="/wallet/add-funds"
+              className="bg-purple-600 text-white px-6 py-3 rounded-lg hover:bg-purple-700 transition-colors"
+            >
+              Add Funds
+            </Link>
           <button
             onClick={handleLogout}
             disabled={loggingOut}
-            className="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 transition disabled:opacity-50"
+              className="bg-red-600 text-white px-6 py-3 rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors"
           >
             {loggingOut ? "Logging out..." : "Logout"}
           </button>
+          </div>
         </div>
       </div>
     </>

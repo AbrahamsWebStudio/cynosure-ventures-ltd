@@ -12,7 +12,11 @@ interface Vendor {
   id: string;
   name: string;
   phone: string | null;
-  bank_account: any | null;
+  bank_account: {
+    bank_name?: string;
+    account_number?: string;
+    account_name?: string;
+  } | null;
   created_at: string;
 }
 
@@ -87,8 +91,8 @@ export default function VendorsListPage() {
         </div>
         {/* Export Buttons */}
         <div className="flex gap-2">
-          <Button onClick={() => exportToCSV(vendors as any[], 'vendors_export')}>Export CSV</Button>
-          <Button onClick={() => exportToExcel(vendors as any[], 'vendors_export')}>Export Excel</Button>
+          <Button onClick={() => exportToCSV(vendors as unknown as { [key: string]: string | number | boolean | null | undefined }[], 'vendors_export')}>Export CSV</Button>
+          <Button onClick={() => exportToExcel(vendors as unknown as { [key: string]: string | number | boolean | null | undefined }[], 'vendors_export')}>Export Excel</Button>
         </div>
         {/* Vendors Table */}
         <div className="overflow-x-auto">
@@ -108,8 +112,8 @@ export default function VendorsListPage() {
                 <tr key={vendor.id} className="border-b dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800">
                   <td className="p-2 text-sm">{vendor.name}</td>
                   <td className="p-2 text-sm">{vendor.phone || 'N/A'}</td>
-                  <td className="p-2 text-sm">{vendor.bank_account?.bank || 'N/A'}</td>
-                  <td className="p-2 text-sm">{vendor.bank_account?.account || 'N/A'}</td>
+                  <td className="p-2 text-sm">{vendor.bank_account?.bank_name || 'N/A'}</td>
+                  <td className="p-2 text-sm">{vendor.bank_account?.account_number || 'N/A'}</td>
                   <td className="p-2 text-sm">{new Date(vendor.created_at).toLocaleString()}</td>
                   <td className="p-2 text-sm">
                     <button
